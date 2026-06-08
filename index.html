@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Expense Tracker PWA</title>
+
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#2563eb">
+
+<style>
+:root{
+ --bg:#f4f4f4;
+ --card:#fff;
+ --text:#111;
+}
+.dark{
+ --bg:#121212;
+ --card:#1e1e1e;
+ --text:#fff;
+}
+body{
+ margin:0;
+ font-family:Arial,sans-serif;
+ background:var(--bg);
+ color:var(--text);
+ padding:15px;
+}
+.card{
+ background:var(--card);
+ padding:15px;
+ border-radius:10px;
+ margin-bottom:15px;
+}
+input,select,button{
+ width:100%;
+ padding:12px;
+ margin-top:8px;
+ box-sizing:border-box;
+}
+.balance{
+ font-size:28px;
+ font-weight:bold;
+ text-align:center;
+}
+.item{
+ padding:10px;
+ border-bottom:1px solid #ccc;
+}
+.row{
+ display:flex;
+ justify-content:space-between;
+ align-items:center;
+ gap:5px;
+}
+.small{
+ width:auto;
+ padding:6px 10px;
+}
+.income{color:green;}
+.expense{color:red;}
+</style>
+</head>
+<body>
+
+<div class="card">
+<h2>Expense Tracker</h2>
+
+<button onclick="toggleTheme()">🌙 Dark Mode</button>
+
+<button id="installBtn" style="display:none">
+Install App
+</button>
+
+<input type="date" id="date">
+
+<select id="type">
+<option value="income">Income</option>
+<option value="expense">Expense</option>
+</select>
+
+<input id="desc" placeholder="Description">
+
+<input id="amount" type="number" placeholder="Amount">
+
+<button onclick="addTransaction()">
+Save Transaction
+</button>
+</div>
+
+<div class="card">
+<div>Current Balance</div>
+<div class="balance" id="balance">
+₹0
+</div>
+</div>
+
+<div class="card">
+<h3>Monthly Summary</h3>
+
+<div id="monthlyIncome">Income: ₹0</div>
+<div id="monthlyExpense">Expense: ₹0</div>
+</div>
+
+<div class="card">
+<input id="search"
+placeholder="Search..."
+oninput="loadData()">
+
+<button onclick="exportCSV()">
+Export CSV
+</button>
+</div>
+
+<div class="card">
+<h3>Transactions</h3>
+<div id="list"></div>
+</div>
+
+<script>
+let db;
+let deferredPrompt;
+
+const req=indexedDB.open("ExpenseTrackerDB",1);
+
+req.onupgradeneeded=e=>{
+ db=e.target.result;
+
+ if(!db.objectStoreNames.contains("transactions")){
+  db.createObjectStore(
+   "transactions",
+   {keyPath:"id",autoIncrement:true}
+  );
+ }
+};
+
+req.onsuccess=e=>{
+ db=e.target.result;
+
+ document.getElementById("date").value=
+ new Date().toISOString().split("T")[0];
+
+ loadData();
+};
+
+window.addEventListener(
+ "beforeinstallprompt",
+ e=>{
+  e.preventDefault();
+  deferredPrompt=e;
+  installBtn.style.display="block";
+ });
+
+installBtn.onclick=async()=>{
+ deferredPrompt.prompt();
+};
+
+function addTransaction(){
+
+ const tx=db.transaction(
+ ["transactions"],
+ "readwrite"
+ );
+
+ tx.objectStore("transactions").add({
+  date:date.value,
+  type:type.value,
+  description:desc.value,
+  amount:Number(amount.value)
+ });
+
+ tx.oncomplete=()=>{
+  desc.value="";
+  amount.value="";
+  loadData();
+ };
+}
+
+function loadData(){
+
+ const tx=db.transaction(
+ ["transactions"],
+ "readonly"
+ );
+
+ tx.objectStore("transactions")
+ .getAll()
+ .onsuccess=e=>{
+
+  let data=e.target.result;
+
+  const searchText=
+  search.value.toLowerCase();
+
+  data=data.filter(x=>
+   x.description
+   .toLowerCase()
+   .includes(searchText)
+  );
+
+  render(data);
+ };
+}
+
+function render(data){
+
+ let balance=0;
+ let income=0;
+ let expense=0;
+
+ list.innerHTML="";
+
+ data.sort((a,b)=>b.id-a.id);
+
+ const currentMonth=
+ new Date().getMonth()+1;
+
+ data.forEach(item=>{
+
+  const month=
+  new Date(item.date)
+  .getMonth()+1;
+
+  if(item.type==="income"){
+   balance+=item.amount;
+
+   if(month===currentMonth)
+   income+=item.amount;
+  }
+  else{
+   balance-=item.amount;
+
+   if(month===currentMonth)
+   expense+=item.amount;
+  }
+
+  list.innerHTML+=`
+  <div class="item">
+   <div class="row">
+    <strong>${item.description}</strong>
+
+    <div>
+     <button
+      class="small"
+      onclick="editItem(${item.id})">
+      Edit
+     </button>
+
+     <button
+      class="small"
+      onclick="deleteItem(${item.id})">
+      Delete
+     </button>
+    </div>
+   </div>
+
+   <div>${item.date}</div>
+
+   <div class="${item.type}">
+    ${item.type.toUpperCase()}
+    ₹${item.amount}
+   </div>
+  </div>
+  `;
+ });
+
+ balanceEl=document.getElementById("balance");
+ balanceEl.innerHTML=
+ "₹"+balance.toFixed(2);
+
+ monthlyIncome.innerHTML=
+ "Income: ₹"+income.toFixed(2);
+
+ monthlyExpense.innerHTML=
+ "Expense: ₹"+expense.toFixed(2);
+}
+
+function deleteItem(id){
+
+ const tx=db.transaction(
+ ["transactions"],
+ "readwrite"
+ );
+
+ tx.objectStore("transactions")
+ .delete(id);
+
+ tx.oncomplete=loadData;
+}
+
+function editItem(id){
+
+ const tx=db.transaction(
+ ["transactions"],
+ "readonly"
+ );
+
+ tx.objectStore("transactions")
+ .get(id)
+ .onsuccess=e=>{
+
+  const item=e.target.result;
+
+  const d=
+  prompt(
+   "Description",
+   item.description
+  );
+
+  if(d===null) return;
+
+  const a=
+  prompt(
+   "Amount",
+   item.amount
+  );
+
+  if(a===null) return;
+
+  item.description=d;
+  item.amount=Number(a);
+
+  const tx2=db.transaction(
+   ["transactions"],
+   "readwrite"
+  );
+
+  tx2.objectStore("transactions")
+  .put(item);
+
+  tx2.oncomplete=loadData;
+ };
+}
+
+function exportCSV(){
+
+ const tx=db.transaction(
+ ["transactions"],
+ "readonly"
+ );
+
+ tx.objectStore("transactions")
+ .getAll()
+ .onsuccess=e=>{
+
+  const rows=e.target.result;
+
+  let csv=
+  "Date,Type,Description,Amount\n";
+
+  rows.forEach(r=>{
+   csv+=
+   `${r.date},${r.type},${r.description},${r.amount}\n`;
+  });
+
+  const blob=
+  new Blob([csv]);
+
+  const a=
+  document.createElement("a");
+
+  a.href=
+  URL.createObjectURL(blob);
+
+  a.download=
+  "expenses.csv";
+
+  a.click();
+ };
+}
+
+function toggleTheme(){
+
+ document.body.classList.toggle(
+ "dark"
+ );
+
+ localStorage.setItem(
+ "theme",
+ document.body.classList.contains("dark")
+ );
+}
+
+if(localStorage.getItem("theme")==="true"){
+ document.body.classList.add("dark");
+}
+
+if("serviceWorker" in navigator){
+ navigator.serviceWorker.register(
+ "service-worker.js"
+ );
+}
+</script>
+
+</body>
+</html>
